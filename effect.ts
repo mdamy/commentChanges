@@ -41,29 +41,22 @@ export function createGadgetRecord<Shape>(apiIdentifier: string, data: Shape): G
 }
 
 /**
- * Set incoming parameters onto a `record` object.
- *
- * @param params - Parameters for setting, usually from an action context or a  to set on the record
- * @param record - Record to apply parameters to
+ * Applies incoming API params (your model’s fields) to a record
+ * 
+ * @param params - data passed from API calls, webhook events, or direct user inputs.
+ * @param record - object used to pass params to
  */
 export function applyParams(params: AnyParams, record: GadgetRecord<any>) {
   const model = getModelByTypename(record.__typename);
-
-  // override the record with any new params, including relationId params from any _link params on belongs to relationships
-  // Change the code snippet in `ApplyParamsDetailsPanel.tsx` when the code below updates
   Object.assign(record, params[model.apiIdentifier], getBelongsToRelationParams(model, params));
 }
 
 /**
- * Validates the given record, then creates or updates the record in the database.
+ * Saves record to the database:
+ * 1. Checks field validations of a given record, then saves the record to the database.
+ * 2. Uses your apps Internal API to persist data. This API quickly interacts with data without running any business logic.
  *
- * If any validation errors are encountered, they'll be thrown as a GadgetValidationError.
- *
- * Uses the Internal API for your application to persist data.
- *
- * The record param must have a `__typename` parameter.
- *
- * @param record - Record to save to the database
+ * @param record - object saved to the database
  */
 export async function save(record: GadgetRecord<any>) {
   const context = maybeGetActionContextFromLocalStorage();
@@ -95,9 +88,9 @@ export async function save(record: GadgetRecord<any>) {
 }
 
 /**
- * Deletes the given record from your database.
+ * Deletes record from the database.
  *
- * @param record - Record to delete from the database
+ * @param record - object deleted from the database
  */
 export async function deleteRecord(record: GadgetRecord<any>) {
   const context = maybeGetActionContextFromLocalStorage();
@@ -170,6 +163,11 @@ export function transitionState(
   record.state = transition.to;
 }
 
+/**
+* The following is used to power shopifySync model. 
+* To learn more about syncing visit our docs: https://docs.gadget.dev/guides/plugins/shopify/syncing-shopify-data#syncing
+*/
+
 export async function shopifySync(params: AnyParams, record: GadgetRecord<any>) {
   const context = getActionContextFromLocalStorage();
   const effectAPIs = context.effectAPIs;
@@ -180,8 +178,6 @@ export async function shopifySync(params: AnyParams, record: GadgetRecord<any>) 
   );
 
   const shopId = assert(syncRecord.shopId, "a shop is required to start a sync");
-
-  // verify that models is an array of strings if defined
 
   if (!syncRecord.models || (Array.isArray(syncRecord.models) && syncRecord.models.every((m) => typeof m == "string"))) {
     try {
@@ -225,16 +221,15 @@ export async function abortSync(params: AnyParams, record: GadgetRecord<any>) {
 }
 
 /**
- * Enforce that the given record is only accessible by the current shop. For multi-tenant Shopify applications, this is key for enforcing data can only be accessed by the shop that owns it.
- *
- * For existing records, this function verifies the record object has the same `shopId` as the shop in the current session, and throws if not
- * For new records, this function sets the record's `shopId` to the current session's `shopId`.
- *
- * The `shopBelongsToField` option is a required parameter if the model has more than one related shop field to specify which field to use.
- *
- * @param params - Incoming parameters, validated against the current `shopId`
- * @param record - Record to validate or set the `shopId` on
- * @param options - Options for the function
+ * Applicable to for multi-tenant Shopify apps(public apps), it enforces that the given record is only accessible by the current shop.
+ *  
+ * For new records: sets the the current session's `shopId` to the record 
+ * For existing records: Verifies the record objects `shopId` matches the one from the current session
+ * 
+ * *
+ * @param params - incoming data validated against the current `shopId`
+ * @param record - record used to validate or set the `shopId` on
+ * @param options - 'shopBelongsToField' picks which related model is used for cross-shop validation
  */
 export async function preventCrossShopDataAccess(params: AnyParams, record: GadgetRecord<any>, options?: { shopBelongsToField: string }) {
   const context = getActionContextFromLocalStorage();
@@ -255,19 +250,16 @@ export async function preventCrossShopDataAccess(params: AnyParams, record: Gadg
   const appTenancy = context[AppTenancyKey];
   const shopBelongsToField = options?.shopBelongsToField;
 
-  // if there's no tenancy let's continue
   if (appTenancy?.shopify?.shopId === undefined) {
     return;
   }
 
-  // if this effect is not run in the context of a model then it does not apply
   if (!model) {
     return;
   }
 
   const shopId = String(appTenancy.shopify.shopId);
 
-  // If this effect is being added to the Shopify Shop model, simply compare the record's ID
   if (model.key == ShopifyShopKey) {
     if (record && String(record.id) !== shopId) {
       throw new PermissionDeniedError();
@@ -308,7 +300,6 @@ export async function preventCrossShopDataAccess(params: AnyParams, record: Gadg
 
   const input = params[model.apiIdentifier];
 
-  // if we're trying to set the params to a shop other than the tenant we should reject
   if (Globals.platformModules.lodash().isObjectLike(input)) {
     const objectInput = input as Record<string, any>;
     if (objectInput[relatedField.apiIdentifier]) {
@@ -331,14 +322,12 @@ export async function preventCrossShopDataAccess(params: AnyParams, record: Gadg
   if (record) {
     const value = record.getField(relatedField.apiIdentifier);
 
-    // if the record doesn't have a shop set then anyone can update it
     if (value) {
       const recordShopId = typeof value === "object" ? value[LINK_PARAM] : value;
       if (String(recordShopId) !== shopId) {
         throw new PermissionDeniedError();
       }
     } else {
-      // we have to re-apply the params to the record to ensure that this effect still works correctly if it occurs after "apply params"
       record.setField(relatedField.apiIdentifier, {
         [LINK_PARAM]: shopId,
       });
@@ -346,6 +335,11 @@ export async function preventCrossShopDataAccess(params: AnyParams, record: Gadg
   }
 }
 
+/**
+* Updates the state of a `bulkOperation` record from Shopify when the operation completes.
+*
+* @param record - the `bulkOperation` record updated
+*/
 export async function finishBulkOperation(record: GadgetRecord<any>) {
   if (!record?.id) {
     Globals.logger.warn(`Expected bulk operation record to be present for action`);
@@ -378,7 +372,6 @@ export async function finishBulkOperation(record: GadgetRecord<any>) {
       }`)
   ).node;
 
-  // normalize the mixed upper/lowercase (GraphQL/REST) to lowercase
   const { status, errorCode, type } = bulkOperation;
   Object.assign(record, {
     ...bulkOperation,
@@ -389,6 +382,15 @@ export async function finishBulkOperation(record: GadgetRecord<any>) {
   });
 }
 
+/**
+* Syncs Shopify models across all models
+*
+* @param params - list of Shopify app credentials to sync data from
+* @param syncSince - starting point for data sync (default: all time)
+* @param models - list of model names to sync data from
+* @param force - enforces syncswithout checking if they're up to date
+* @param startReason - a string reason stored on the created 'shopifySync' records
+*/
 export async function globalShopifySync(params: {
   apiKeys: string[];
   syncSince: string;
@@ -439,7 +441,6 @@ export async function globalShopifySync(params: {
     }
 
     for (const result of results) {
-      // skip the sync if there is no accessToken set or if the state is uninstalled
       if (Globals.platformModules.lodash().isEmpty(result[accessTokenIdentifier]) || result.state?.created == "uninstalled") {
         Globals.logger.info({ shopId: result.id }, "skipping sync for shop without access token or is uninstalled");
         continue;
@@ -477,7 +478,6 @@ export async function globalShopifySync(params: {
           }
         );
 
-        // we might have some errors such as the desired models not being enabled for the connection
         if (response[runShopSyncIdentifier] && !response[runShopSyncIdentifier].success) {
           Globals.logger.warn(
             { userVisible: true, shop: result, error: response[runShopSyncIdentifier].errors },
@@ -485,7 +485,6 @@ export async function globalShopifySync(params: {
           );
         }
       } catch (error) {
-        // log that the sync could not be started for the shop but continue
         Globals.logger.warn({ userVisible: true, error, shop: result }, "couldn't start sync for shop");
       }
     }
@@ -538,20 +537,10 @@ export async function legacySuccessfulAuthentication(params: AnyParams) {
   }
 }
 
-/**
- * Internal helper functions and variables
- */
-
-/**
- * Get action context without `params` and `record` from async local storage.
- */
 function getActionContextFromLocalStorage() {
   return assert(actionContextLocalStorage.getStore(), "this effect function should only be called from within an action");
 }
 
-/**
- * Similar to `getActionContextFromLocalStorage` but returns `undefined` if there is no action context. (i.e. possibly called from a route)
- */
 function maybeGetActionContextFromLocalStorage() {
   return actionContextLocalStorage.getStore();
 }
@@ -628,10 +617,6 @@ export enum FieldType {
   Code = "Code",
   EncryptedString = "EncryptedString",
   Vector = "Vector",
-  /**
-   * Any value at all.
-   * Prefer FieldType.JSON where possible, it's more descriptive.
-   */
   Any = "Any",
   Null = "Null",
   RecordState = "RecordState",

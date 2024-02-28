@@ -1,15 +1,17 @@
 /**
- * Action configuration settings
+ * Specifies action configurations in Gadget
  *
- * @property actionType - Action type. Defaults to `custom`.
- * @property transactional - Whether the action when running the `run` function should be run in a transaction. Defaults to `true` for model actions, and `false` for global actions.
- * @property timeoutMS - The timeout in milliseconds for the action. Defaults to 3 minutes (180000).
- * @property returnType - Whether the action should return the result of the `run` function. Defaults to `false` for model actions and `true` for global actions.
- */
+ * @property actionType - unique to model actions, this dictates the actions role in a data model (e.g. "create" does not accept an id param in the api, checks field validation passed by the params, and initates a new record in the db)
+ * @property transactional - indicates whether `run` function should be transactional or not (defaults to `true` for model actions, and `false` for actions)
+ * @property timeoutMS - specifies max time in milliseconds for the action to run before being terminated (defaults to 180000ms[3 mins])
+ * @property returnType - specifies if an action should return the result of the `run` function (defaults to `false` for model actions and `true` for actions)
+ * @property triggers - specifies the triggers to an action
+*/
 export interface ActionOptions {
     actionType?: "create" | "update" | "delete" | "custom";
     transactional?: boolean;
     timeoutMS?: number;
     returnType?: boolean;
+    triggers?: [MISSING TYPE]
   }
   
